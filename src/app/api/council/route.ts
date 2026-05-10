@@ -68,13 +68,26 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      if (!success) throw new Error("All API keys and models are currently exhausted. Please wait 10 minutes.");
+      if (!success) {
+        console.warn("Council exhausted, attempting Emergency Single-Agent fallback...");
+        continue; // Try next agent turn or fallback below
+      }
       
       if (agent.id === "judge") return NextResponse.json({ answer: output });
       context += `\n[${agent.name}]: ${output}\n`;
     }
 
-    return NextResponse.json({ answer: "Process complete." });
+    // FINAL EMERGENCY FALLBACK: If we reach here without a judge answer
+    for (const key of keys) {
+      try {
+        const genAI = new GoogleGenerativeAI(key!);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const result = await model.generateContent(`Emergency Mode: ${query}`);
+        return NextResponse.json({ answer: `⚠️ [Emergency Mode] ${result.response.text()}` });
+      } catch (e) { continue; }
+    }
+
+    throw new Error("Critical: Total API Blackout. All keys and fallbacks exhausted. Please wait 10 minutes.");
 
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
