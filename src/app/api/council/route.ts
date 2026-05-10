@@ -1,76 +1,67 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, DynamicRetrievalMode } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
   try {
-    const { query, mode, history } = await req.json();
+    const { query, mode, history, depth } = await req.json();
     
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
     }
 
-    // Council Personas
-    const agents = [
-      { name: "Analyst", role: "Deconstruct the query into logical requirements." },
-      { name: "Researcher", role: "Provide facts, context, and structural knowledge." },
-      { name: "Critic", role: "Identify logic flaws, biases, and hallucinations." },
-      { name: "Optimizer", role: "Refine and condense the combined reasoning." },
-      { name: "Judge", role: "Synthesize the final, high-quality response. Output ONLY the final response text. Do NOT include internal logs, evaluation notes, or 'Final Response' labels. Your output goes directly to the user." }
+    // 1. Determine Agent Depth
+    const allAgents = [
+      { id: "analyst", name: "Analyst", role: "Deconstruct the query into logic." },
+      { id: "researcher", name: "Researcher", role: "Provide facts and context using search." },
+      { id: "critic", name: "Critic", role: "Identify logic flaws and hallucinations." },
+      { id: "optimizer", name: "Optimizer", role: "Streamline the combined reasoning." },
+      { id: "judge", name: "Judge", role: "Final answer ONLY. No logs." }
     ];
 
-    let currentHistory = `HISTORY: ${JSON.stringify(history)}\nQUERY: ${query}\nMODE: ${mode}\n`;
-    
-    // Model Fallback List for Stability
-    const modelNames = ["gemini-flash-lite-latest", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
-    let finalAnswer = "";
+    let activeAgents = [];
+    if (depth === "instant") activeAgents = [allAgents[4]];
+    else if (depth === "standard") activeAgents = [allAgents[0], allAgents[1], allAgents[4]];
+    else activeAgents = allAgents;
 
-    // Sequential Baton Passing
-    for (const agent of agents) {
+    // 2. Optimized Model Selection (V2 Flash Lite)
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash-lite",
+      tools: [{ googleSearch: {} }] // Enable Google Search
+    });
+
+    let context = `HISTORY (Last 3): ${JSON.stringify(history.slice(-3))}\nMODE: ${mode}\nQUERY: ${query}\n`;
+
+    for (const agent of activeAgents) {
       const prompt = `
-        You are the ${agent.name} Agent in a Council of Experts.
-        Your task: ${agent.role}
+        Agent: ${agent.name}
+        Role: ${agent.role}
+        Council Context: ${context}
         
-        Current Context:
-        ${currentHistory}
-        
-        Action: Provide your specialized contribution. Keep it internal and logical.
+        Action: Provide your contribution. If you are the Judge, output ONLY the final user-facing response.
       `;
 
-      // Free tier rate limit delay
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 1500)); // Minimum safety delay
 
-      let output = "";
-      let success = false;
-      
-      // Try multiple models if one is busy
-      for (const modelName of modelNames) {
-        try {
-          const model = genAI.getGenerativeModel({ model: modelName });
-          const result = await model.generateContent(prompt);
-          output = result.response.text();
-          success = true;
-          break; 
-        } catch (e: any) {
-          console.warn(`Model ${modelName} failed, trying next...`, e.message);
-          continue;
-        }
-      }
+      const result = await model.generateContent({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: DynamicRetrievalMode.MODE_DYNAMIC, dynamicThreshold: 0.3 } } }]
+      });
 
-      if (!success) throw new Error("All Gemini models are currently overloaded. Please try again in a few minutes.");
+      const output = result.response.text();
       
-      if (agent.name === "Judge") {
-        finalAnswer = output;
+      if (agent.id === "judge") {
+        return NextResponse.json({ answer: output });
       } else {
-        currentHistory += `\n[${agent.name} Output]: ${output}\n`;
+        context += `\n[${agent.name}]: ${output}\n`;
       }
     }
 
-    return NextResponse.json({ answer: finalAnswer });
-    
+    return NextResponse.json({ answer: "No judge output generated." });
+
   } catch (error: any) {
-    console.error("Council Error:", error);
+    console.error("V2 Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
