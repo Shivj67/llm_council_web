@@ -11,7 +11,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
 
     // Council Personas
     const agents = [
