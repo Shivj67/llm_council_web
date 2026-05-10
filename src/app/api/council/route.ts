@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     // 2. Optimized Model Selection (V2 Flash Lite)
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.0-flash-lite",
-      tools: [{ googleSearch: {} }] // Enable Google Search
+      tools: [{ googleSearchRetrieval: {} }] // Enable Google Search
     });
 
     let context = `HISTORY (Last 3): ${JSON.stringify(history.slice(-3))}\nMODE: ${mode}\nQUERY: ${query}\n`;
