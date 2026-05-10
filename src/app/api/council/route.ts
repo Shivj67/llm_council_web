@@ -11,7 +11,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
     }
 
-    // 1. Determine Agent Depth
     const allAgents = [
       { id: "analyst", name: "Analyst", role: "Deconstruct the query into logic." },
       { id: "researcher", name: "Researcher", role: "Provide facts and context using search." },
@@ -25,43 +24,57 @@ export async function POST(req: NextRequest) {
     else if (depth === "standard") activeAgents = [allAgents[0], allAgents[1], allAgents[4]];
     else activeAgents = allAgents;
 
-    // 2. Optimized Model Selection (V2 Flash Lite)
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash-lite",
-      tools: [{ googleSearchRetrieval: {} }] // Enable Google Search
-    });
+    // Fallback Models List
+    const modelNames = [
+      "gemini-2.0-flash-lite", 
+      "gemini-1.5-flash", 
+      "gemini-flash-lite-latest", 
+      "gemini-pro"
+    ];
 
     let context = `HISTORY (Last 3): ${JSON.stringify(history.slice(-3))}\nMODE: ${mode}\nQUERY: ${query}\n`;
 
     for (const agent of activeAgents) {
-      const prompt = `
-        Agent: ${agent.name}
-        Role: ${agent.role}
-        Council Context: ${context}
-        
-        Action: Provide your contribution. If you are the Judge, output ONLY the final user-facing response.
-      `;
+      const prompt = `Agent: ${agent.name}\nRole: ${agent.role}\nContext: ${context}\nAction: Provide contribution.`;
 
-      await new Promise(r => setTimeout(r, 1500)); // Minimum safety delay
+      await new Promise(r => setTimeout(r, 2000));
 
-      const result = await model.generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: DynamicRetrievalMode.MODE_DYNAMIC, dynamicThreshold: 0.3 } } }]
-      });
-
-      const output = result.response.text();
+      let output = "";
+      let success = false;
       
-      if (agent.id === "judge") {
-        return NextResponse.json({ answer: output });
-      } else {
-        context += `\n[${agent.name}]: ${output}\n`;
+      for (const modelName of modelNames) {
+        try {
+          const model = genAI.getGenerativeModel({ 
+            model: modelName,
+            tools: [{ googleSearchRetrieval: {} }]
+          });
+          
+          const result = await model.generateContent({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: DynamicRetrievalMode.MODE_DYNAMIC, dynamicThreshold: 0.3 } } }]
+          });
+          
+          output = result.response.text();
+          success = true;
+          break; 
+        } catch (e: any) {
+          if (e.message.includes("429")) {
+            console.warn(`Quota hit for ${modelName}, waiting 7s...`);
+            await new Promise(r => setTimeout(r, 7000));
+          }
+          continue;
+        }
       }
+
+      if (!success) throw new Error("All free-tier models are currently exhausted. Please wait 10 minutes.");
+      
+      if (agent.id === "judge") return NextResponse.json({ answer: output });
+      context += `\n[${agent.name}]: ${output}\n`;
     }
 
-    return NextResponse.json({ answer: "No judge output generated." });
+    return NextResponse.json({ answer: "Process complete." });
 
   } catch (error: any) {
-    console.error("V2 Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
