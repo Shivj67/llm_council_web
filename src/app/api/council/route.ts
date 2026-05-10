@@ -1,14 +1,18 @@
 import { GoogleGenerativeAI, DynamicRetrievalMode } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+// Multi-Key Management
+const keys = [
+  process.env.GEMINI_API_KEY,
+  process.env.GEMINI_API_KEY_2
+].filter(Boolean);
 
 export async function POST(req: NextRequest) {
   try {
     const { query, mode, history, depth } = await req.json();
     
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
+    if (keys.length === 0) {
+      return NextResponse.json({ error: "No API Keys Configured" }, { status: 500 });
     }
 
     const allAgents = [
@@ -25,48 +29,46 @@ export async function POST(req: NextRequest) {
     else activeAgents = allAgents;
 
     // Fallback Models List
-    const modelNames = [
-      "gemini-2.0-flash-lite", 
-      "gemini-1.5-flash", 
-      "gemini-flash-lite-latest", 
-      "gemini-pro"
-    ];
+    const modelNames = ["gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-pro"];
 
-    let context = `HISTORY (Last 3): ${JSON.stringify(history.slice(-3))}\nMODE: ${mode}\nQUERY: ${query}\n`;
+    let context = `HISTORY: ${JSON.stringify(history.slice(-3))}\nMODE: ${mode}\nQUERY: ${query}\n`;
 
     for (const agent of activeAgents) {
       const prompt = `Agent: ${agent.name}\nRole: ${agent.role}\nContext: ${context}\nAction: Provide contribution.`;
 
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 1500));
 
       let output = "";
       let success = false;
       
-      for (const modelName of modelNames) {
-        try {
-          const model = genAI.getGenerativeModel({ 
-            model: modelName,
-            tools: [{ googleSearchRetrieval: {} }]
-          });
-          
-          const result = await model.generateContent({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: DynamicRetrievalMode.MODE_DYNAMIC, dynamicThreshold: 0.3 } } }]
-          });
-          
-          output = result.response.text();
-          success = true;
-          break; 
-        } catch (e: any) {
-          if (e.message.includes("429")) {
-            console.warn(`Quota hit for ${modelName}, waiting 7s...`);
-            await new Promise(r => setTimeout(r, 7000));
+      // Multi-Key + Multi-Model Rotation
+      for (const key of keys) {
+        if (success) break;
+        const genAI = new GoogleGenerativeAI(key!);
+
+        for (const modelName of modelNames) {
+          try {
+            const model = genAI.getGenerativeModel({ 
+              model: modelName,
+              tools: [{ googleSearchRetrieval: {} }]
+            });
+            
+            const result = await model.generateContent({
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: DynamicRetrievalMode.MODE_DYNAMIC, dynamicThreshold: 0.3 } } }]
+            });
+            
+            output = result.response.text();
+            success = true;
+            break; 
+          } catch (e: any) {
+            console.warn(`Key/Model combo failed: ${modelName}. Trying next...`);
+            continue;
           }
-          continue;
         }
       }
 
-      if (!success) throw new Error("All free-tier models are currently exhausted. Please wait 10 minutes.");
+      if (!success) throw new Error("All API keys and models are currently exhausted. Please wait 10 minutes.");
       
       if (agent.id === "judge") return NextResponse.json({ answer: output });
       context += `\n[${agent.name}]: ${output}\n`;
