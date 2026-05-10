@@ -28,8 +28,15 @@ export async function POST(req: NextRequest) {
     else if (depth === "standard") activeAgents = [allAgents[0], allAgents[1], allAgents[4]];
     else activeAgents = allAgents;
 
-    // Fallback Models List
-    const modelNames = ["gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-pro"];
+    // Deepest Fallback Models List
+    const modelNames = [
+      "gemini-2.0-flash-lite", 
+      "gemini-1.5-flash", 
+      "gemini-1.5-flash-8b",
+      "gemini-flash-lite-latest", 
+      "gemini-pro",
+      "gemini-1.0-pro"
+    ];
 
     let context = `HISTORY: ${JSON.stringify(history.slice(-3))}\nMODE: ${mode}\nQUERY: ${query}\n`;
 
