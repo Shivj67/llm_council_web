@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
       { name: "Researcher", role: "Provide facts, context, and structural knowledge." },
       { name: "Critic", role: "Identify logic flaws, biases, and hallucinations." },
       { name: "Optimizer", role: "Refine and condense the combined reasoning." },
-      { name: "Judge", role: "Synthesize the final, high-quality response." }
+      { name: "Judge", role: "Synthesize the final, high-quality response. Output ONLY the final response text. Do NOT include internal logs, evaluation notes, or 'Final Response' labels. Your output goes directly to the user." }
     ];
 
     let currentHistory = `HISTORY: ${JSON.stringify(history)}\nQUERY: ${query}\nMODE: ${mode}\n`;
