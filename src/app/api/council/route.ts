@@ -11,8 +11,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-lite-latest" });
-
     // Council Personas
     const agents = [
       { name: "Analyst", role: "Deconstruct the query into logical requirements." },
@@ -23,6 +21,9 @@ export async function POST(req: NextRequest) {
     ];
 
     let currentHistory = `HISTORY: ${JSON.stringify(history)}\nQUERY: ${query}\nMODE: ${mode}\n`;
+    
+    // Model Fallback List for Stability
+    const modelNames = ["gemini-flash-lite-latest", "gemini-1.5-flash", "gemini-1.5-flash-latest"];
     let finalAnswer = "";
 
     // Sequential Baton Passing
@@ -37,11 +38,27 @@ export async function POST(req: NextRequest) {
         Action: Provide your specialized contribution. Keep it internal and logical.
       `;
 
-      // Free tier rate limit delay (brief)
+      // Free tier rate limit delay
       await new Promise(r => setTimeout(r, 2000));
 
-      const result = await model.generateContent(prompt);
-      const output = result.response.text();
+      let output = "";
+      let success = false;
+      
+      // Try multiple models if one is busy
+      for (const modelName of modelNames) {
+        try {
+          const model = genAI.getGenerativeModel({ model: modelName });
+          const result = await model.generateContent(prompt);
+          output = result.response.text();
+          success = true;
+          break; 
+        } catch (e: any) {
+          console.warn(`Model ${modelName} failed, trying next...`, e.message);
+          continue;
+        }
+      }
+
+      if (!success) throw new Error("All Gemini models are currently overloaded. Please try again in a few minutes.");
       
       if (agent.name === "Judge") {
         finalAnswer = output;
